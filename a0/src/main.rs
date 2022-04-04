@@ -59,35 +59,6 @@ struct Elf64Header {
     shstrndx: u16,
 }
 
-/// A heap allocated buffer aligned like T.
-struct Buffer<T>{
-    data: Box<MaybeUninit<T>>,
-}
-
-/// A zero zero intialised heap allocation to read data from a file into.
-impl<T> Buffer<T> {
-
-    ///
-    pub fn new() -> Self {
-        Buffer {
-            data: Box::new_zeroed(),
-        }
-    }
-
-    /// Get a reference to write into the buffer.
-    pub fn read_buf(&mut self) -> ReadBuf<'_> {
-        ReadBuf::uninit(self.data.as_bytes_mut())
-    }
-
-    /// Get the value.
-    ///
-    /// Safe if you've only written valid things into the buffer and/or all 0s
-    /// are a valid value.
-    pub unsafe fn get(self) -> Box<T> {
-        self.data.assume_init()
-    }
-}
-
 #[derive(Debug)]
 enum Error {
     Io(io::Error),
@@ -99,13 +70,14 @@ enum Error {
 }
 
 fn main() -> Result<(), Error> {
-    let mut buf: Buffer<Elf64Header> = Buffer::new();
+    let mut buf: MaybeUninit<Elf64Header> = MaybeUninit::zeroed();
 
     let mut file = File::open("../simple").map_err(Error::Io)?;
 
-    file.read_buf_exact(&mut buf.read_buf()).map_err(Error::Io)?;
+    file.read_buf_exact(&mut ReadBuf::uninit(buf.as_bytes_mut()))
+        .map_err(Error::Io)?;
 
-    let header = unsafe { buf.get() };
+    let header = unsafe { buf.assume_init() };
 
     header.ident.starts_with(&[0x7f, 0x45, 0x4c, 0x46])
         .then_some(())
@@ -121,6 +93,7 @@ fn main() -> Result<(), Error> {
                     std::mem::size_of::<Elf64Header>(),
                     header.ehsize)))?;
 
+    println!("{:x?}", std::mem::align_of::<Elf64Header>());
     println!("{:x?}", header);
 
     Ok(())
